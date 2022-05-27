@@ -1,0 +1,2 @@
+# Verilog_Practice
+在HDLBits上学习VerilogHDL
