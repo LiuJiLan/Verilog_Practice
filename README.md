@@ -1,11 +1,11 @@
 # Verilog_Practice
-在HDLBits上学习VerilogHDL
+在[HDLBits](https://hdlbits.01xz.net/wiki/Main_Page)上学习VerilogHDL
 
 
 
 暂时没找到好用的HDL编辑器之前先先用MarkDown来写了
 
-[Verilog 2001标准](https://sutherland-hdl.com/pdfs/verilog_2001_ref_guide.pdf)
+[Verilog 2001标准pdf下载地址](https://sutherland-hdl.com/pdfs/verilog_2001_ref_guide.pdf)
 
 # Verilog Language
 
@@ -1190,15 +1190,41 @@ endmodule
 
 
 
-
-
-
-
 ### Arithmetic Circuits
 #### Half adder
 #### Full adder
+
+异或本身就是半加, 半加的结果再加cin, 所以sum = a ^ b ^ cin;
+
+
+
 #### 3-bit binary adder
 #### Adder
+
+我用了generate, 标答更加简洁:
+
+```verilog
+module top_module (
+	input [3:0] x,
+	input [3:0] y,
+	output [4:0] sum
+);
+
+	// This circuit is a 4-bit ripple-carry adder with carry-out.
+	assign sum = x+y;	// Verilog addition automatically produces the carry-out bit.
+
+	// Verilog quirk: Even though the value of (x+y) includes the carry-out, (x+y) is still considered to be a 4-bit number (The max width of the two operands).
+	// This is correct:
+	// assign sum = (x+y);
+	// But this is incorrect:
+	// assign sum = {x+y};	// Concatenation operator: This discards the carry-out
+endmodule
+```
+
+注意: (x + y)仍然是4位, 但是附带了进位信息; {x+y}则丢弃进位信息。
+
+
+
 #### Signed addition overflow
 #### 100-bit binary adder
 #### 4-digit BCD adder
