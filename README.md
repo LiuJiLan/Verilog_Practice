@@ -1226,10 +1226,80 @@ endmodule
 
 
 #### Signed addition overflow
+
+一开始想得是, 直接利用`(x + y)`会附带进位信息来做这道题:
+
+```verilog
+module top_module (
+    input [7:0] a,
+    input [7:0] b,
+    output [7:0] s,
+    output overflow
+); //
+ 
+    // assign s = ...
+    // assign overflow = ...
+    assign {overflow, s} = a + b;
+
+endmodule
+```
+
+但是这样会有错误, 例如, 8bits情况下 0x70 + 0x90 = 0x100, 本质是 0x70 - 0x70 = 0, 就不是溢出了。
+
+正确的方式应该是用提示中检查符号位的方式, 例如两个正数的输出是个负数, 或者两个负数的输出是一个正数就是溢出了。
+
+```verilog
+module top_module (
+    input [7:0] a,
+    input [7:0] b,
+    output [7:0] s,
+    output overflow
+); //
+ 
+    // assign s = ...
+    // assign overflow = ...
+    assign s = a + b;
+    assign overflow = a[7] & b[7] & ~s[7] | ~a[7] & ~b[7] & s[7];
+
+endmodule
+```
+
+
+
 #### 100-bit binary adder
+
+我的答案跟标答一样:
+
+```verilog
+module top_module( 
+    input [99:0] a, b,
+    input cin,
+    output cout,
+    output [99:0] sum );
+    
+    assign {cout, sum} = a + b + cin;
+
+endmodule
+```
+
+
+
 #### 4-digit BCD adder
 ### Karnaugh Map to Circuit
 #### 3-variable
+
+设原图4行2列, $x \in \{{0,1}\}$, 原图中的0是$\{x, y\} = \{0, 0\}$。
+
+我一开始圈定的范围是x = 1, y = {0, 1, 2, 3}、y = 1, x = {0, 1}、 y = {2, 3}, x = {0, 1}。
+
+这样的范围就是:`assign out = a | b | ~b & c;`。
+
+但是范围其实应该尽量往大的画, 应该画成x = 1, y = {0, 1, 2, 3}、y = {1, 2}, x = {0, 1}、 y = {2, 3}, x = {0, 1}。
+
+这样的范围就是:`assign out = a | b | c;`。
+
+
+
 #### 4-variable
 #### 4-variable
 #### 4-variable
@@ -1238,8 +1308,336 @@ endmodule
 #### Karnaugh map
 #### K-map implemented with a multiplexer
 
+原题要求只能用2选1选择器来实现。
+
+我先当作普通的verilog练习题来做:
+
+```verilog
+module top_module (
+    input c,
+    input d,
+    output [3:0] mux_in
+); 
+    always @(*) begin
+      mux_in = 4'b0;
+    	case({c,d})
+        2'b00: mux_in = 4'b0100;
+            2'b01: mux_in = 4'b0001;
+            2'b10: mux_in = 4'b0101;
+            2'b11: mux_in = 4'b1001;
+            
+        endcase
+    end
+
+endmodule
+```
+
+然后是二选一来表达一些逻辑:
+
+```verilog
+module top_module (
+	input c,
+	input d,
+	output [3:0] mux_in
+);
+	
+	// After splitting the truth table into four columns,
+	// the rest of this question involves implementing logic functions
+	// using only multiplexers (no other gates).
+	// I will use the conditional operator for each 2-to-1 mux: (s ? a : b)
+	assign mux_in[0] = c ? 1 : d;          // 1 mux:   c|d
+	assign mux_in[1] = 0;                  // No muxes:  0
+	assign mux_in[2] = d ? 0 : 1;          // 1 mux:    ~d
+	assign mux_in[3] = c ? d : 0;          // 1 mux:   c&d
+	
+endmodule
+```
+
+标答里面已经实现了与或非, 包括异或之内的其他逻辑都能用这样的基础来实现。
+
 
 
 ## Sequential Logic
 
+
+
+### Latches and Flip-Flops
+
+
+
+#### D flip-flop
+
+我的答案与标答一致, 但标答提出了一个问题我暂时不知道该如何回答。
+
+```verilog
+module top_module(
+	input clk,
+	input d,
+	output reg q);
+	
+	// Use non-blocking assignment for edge-triggered always blocks
+	always @(posedge clk)
+		q <= d;
+
+	// Undefined simulation behaviour can occur if there is more than one edge-triggered
+	// always block and blocking assignment is used. Which always block is simulated first?
+	
+endmodule
+```
+
+
+
+
+
+#### D flip-flops
+#### DFF with reset
+#### DFF with reset value
+#### DFF with asynchronous reset
+
+异步reset就是reset的行为也在敏感事件中, 然后标答详细解释了为什么reset要设为posedge:
+
+```verilog
+module top_module(
+	input clk,
+	input [7:0] d,
+	input areset,
+	output reg [7:0] q);
+	
+	// The only difference in code compared to synchronous reset is in the sensitivity list.
+	always @(posedge clk, posedge areset)
+		if (areset)
+			q <= 0;
+		else
+			q <= d;
+
+
+	// In Verilog, the sensitivity list looks strange. The FF's reset is sensitive to the
+	// *level* of areset, so why does using "posedge areset" work?
+	// To see why it works, consider the truth table for all events that change the input 
+	// signals, assuming clk and areset do not switch at precisely the same time:
+	
+	//  clk		areset		output
+	//   x		 0->1		q <= 0; (because areset = 1)
+	//   x		 1->0		no change (always block not triggered)
+	//  0->1	   0		q <= d; (not resetting)
+	//  0->1	   1		q <= 0; (still resetting, q was 0 before too)
+	//  1->0	   x		no change (always block not triggered)
+	
+endmodule
+```
+
+
+
+#### DFF with byte enable
+#### D Latch
+
+在组合逻辑里用<=确实违反常规, 但Hint提示我们这样做:
+
+- Latches are level-sensitive (not edge-sensitive) circuits, so in an always block, they use level-sensitive sensitivity lists.
+- However, they are still sequential elements, so should use non-blocking assignments.
+- A D-latch acts like a wire (or non-inverting buffer) when enabled, and preserves the current value when disabled.
+
+其实waring信息可以给出一定的解释:
+
+Unless you intentionally wanted to create a latch, this warning usually indicates a bug in a combinational always block. Make sure every variable is assigned a value in all cases so the previous value does not need to be remembered. Possible ways to achieve this include assigning a default value to variables at the top of the always block, using a default case, or having an else clause.
+
+说白了, 就是通过只给一个if不给else的方式,  额外创造一个latch。
+
+
+
+#### DFF
+#### DFF
+#### DFF+gate
+
+第一次尝试失败了, 但是感觉是中间过程的问题, 把d去掉, 直接改用out就好了:
+
+```verilog
+module top_module (
+    input clk,
+    input in, 
+    output out);
+    
+    wire d;
+
+    always @(posedge clk)begin
+        d <= in ^ out;
+        out <= d;
+    end
+    	
+endmodule
+```
+
+第二次的尝试就成功了:
+
+```verilog
+module top_module (
+    input clk,
+    input in, 
+    output out);
+
+    always @(posedge clk)begin
+        out <= in ^ out;
+    end
+    	
+endmodule
+```
+
+我去群里问了一下, 然后有人告诉我, 我的第一种写法相当于构造了两个锁存器。于是我把第一个<=改成了=, 就成功了。
+
+```verilog
+module top_module (
+    input clk,
+    input in, 
+    output out);
+    
+    wire d;
+
+    always @(posedge clk)begin
+        d = in ^ out;
+        out <= d;
+    end
+    	
+endmodule
+```
+
+于是就有了一系列疑问:
+
+1. 在用hdlbits自学之前, 我对`=`与`<=`的看法就是, 前者是顺序执行, 后者是并行。但是当时我就有疑问, 例如在一个`posedge clk`之中, 如果有两个`=`, 为什么在已经是最小单位的一拍里还会有顺序之说?
+
+2. 在学了[Simple wire](### Simple wire)那一节后, 我就意识到, 其实`=`其实就是物理上的连线, 但是包括hdlbits和手册都让我以为, 组合逻辑中的`=`和Procedural`=`有区别。尤其是手册25页:
+
+   variable = expression;
+   Blocking procedural assignment. Expression is evaluated and assigned when the statement is encountered. In a begin—end sequential statement group, execution of the next statement is blocked until the assignment is complete. In the sequence begin m=n; n=m; end, the first assignment changes m before the second assignment reads m.
+
+   让我还是认为`=`是有顺序之分的, 但这又和我在[Simple wire](### Simple wire)那一节学到的矛盾。
+
+然后我查了《数字逻辑基础与Verilog设计 原书第三版》相关章节(P154), 我终于理解了`=`。
+
+其中提到:
+
+*"="称为阻塞赋值。Verilog 编译器按照这些语句在always 块中的先后次序顺序地执行。如果一个变量通过阻塞赋值语句赋值，则这个新赋的值会被该块中所有后续语句使用。*
+
+也就是说其实`=`无论在何时只是在连线。
+
+至于m = n, q = m会什么会**表现为**阻塞是因为他们就是同一个节点(姑且可以这样认为, 书中的图片可以更好的表达, 其实是一种替换关系, 有点像宏替换)。而<=也只是**表现的像**计算机中的并行而已。
+
+
+
+#### Mux and DFF
+#### Mux and DFF
+#### DFFs and gates
+#### Create circuit from truth table
+#### Detect an edge
+#### Detect both edges
+#### Edge capture register
+#### Dual-edge triggered flip-flop
+
+### Counters
+#### Four-bit binary counter
+#### Decade counter
+#### Decade counter again
+#### Slow decade counter
+#### Counter 1-12
+#### Counter 1000
+#### 4-digit decimal counter
+#### 12-hour clock
+
+### Shift Registers
+#### 4-bit shift register
+#### Left/right rotator
+#### Left/right arithmetic shift by 1 or 8
+#### 5-bit LFSR
+#### 3-bit LFSR
+#### 32-bit LFSR
+#### Shift register
+#### Shift register
+#### 3-input LUT
+
+### More Circuits
+Cellular automata
+#### Rule 90
+#### Rule 110
+#### Conway's Game of Life 16x16
+
+### Finite State Machines
+#### Simple FSM 1 (asynchronous reset)
+
+#### Simple FSM 1 (synchronous reset)
+Simple FSM 2 (asynchronous reset)
+Simple FSM 2 (synchronous reset)
+Simple state transitions 3
+Simple one-hot state transitions 3
+Simple FSM 3 (asynchronous reset)
+Simple FSM 3 (synchronous reset)
+Design a Moore FSM
+Lemmings 1
+Lemmings 2
+Lemmings 3
+Lemmings 4
+One-hot FSM
+PS/2 packet parser
+PS/2 packet parser and datapath
+Serial receiver
+Serial receiver and datapath
+Serial receiver with parity checking
+Sequence recognition
+Q8: Design a Mealy FSM
+Q5a: Serial two's complementer (Moore FSM)
+Q5b: Serial two's complementer (Mealy FSM)
+Q3a: FSM
+Q3b: FSM
+Q3c: FSM logic
+Q6b: FSM next-state logic
+Q6c: FSM one-hot next-state logic
+Q6: FSM
+Q2a: FSM
+Q2b: One-hot FSM equations
+Q2a: FSM
+Q2b: Another FSM
+
+
+
 ## Building Larger Circuits
+
+### Counter with period 1000
+4-bit shift register and down counter
+FSM: Sequence 1101 recognizer
+FSM: Enable shift register
+FSM: The complete FSM
+The complete timer
+FSM: One-hot logic equations
+
+
+
+# Verification: Reading Simulations
+
+## Finding bugs in code
+
+### Mux
+NAND
+Mux
+Add/sub
+Case statement
+
+
+## Build a circuit from a simulation waveform
+### Combinational circuit 1
+Combinational circuit 2
+Combinational circuit 3
+Combinational circuit 4
+Combinational circuit 5
+Combinational circuit 6
+Sequential circuit 7
+Sequential circuit 8
+Sequential circuit 9
+Sequential circuit 10
+
+
+
+## Verification: Writing Testbenches
+### Clock
+Testbench1
+AND gate
+Testbench2
+T flip-flop
+
