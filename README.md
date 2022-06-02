@@ -1526,11 +1526,247 @@ endmodule
 #### Mux and DFF
 #### Mux and DFF
 #### DFFs and gates
+
+第一次出错是因为DFF名称与内置的模组名冲突了。
+
+
+
 #### Create circuit from truth table
 #### Detect an edge
+
+1. 首先尝试直接用vector作为敏感事件, 但是报错表示只有vecotr的LSB会被纳入敏感事件。
+2. 接着尝试把vector所有index分开都作为敏感列表, 报警告不要将reg作为敏感事件, 因为这种变化不是显式的。
+3. 于是尝试用if来判断tmp和in是否相等, 当发生改变时赋值(就是现在的代码没有else), 然后以为没有else导致输出被维持了。
+4. 补上了else发生了在1->0时也会触发这是因为in ^ tmp只是输出了变化的部分,  如果变化的部分是0则不用输出(只输出0->1的变化), 所以还要再&上in一次。
+
+```verilog
+module top_module (
+    input clk,
+    input [7:0] in,
+    output [7:0] pedge
+);
+    
+    reg [7:0]tmp;
+    always @(posedge clk)begin
+        if (in != tmp) begin
+        tmp <= in;
+        pedge <= in ^ tmp & in;
+        end
+        else pedge <= '0;
+    end
+        
+endmodule
+```
+
+标答更简洁:
+
+```verilog
+module top_module(
+	input clk,
+	input [7:0] in,
+	output reg [7:0] pedge);
+	
+	reg [7:0] d_last;	
+			
+	always @(posedge clk) begin
+		d_last <= in;			// Remember the state of the previous cycle
+		pedge <= in & ~d_last;	// A positive edge occurred if input was 0 and is now 1.
+	end
+	
+endmodule
+```
+
+
+
 #### Detect both edges
+
+就是我上一题第4次尝试写的那个错误答案, 因为这个是同时检测上升沿和下降沿。
+
+然后参考上题标答同时其实可以省去tmp和in的判断, 直接用tmp ^ in来表示anyedge <= '0。
+
+```verilog
+module top_module (
+    input clk,
+    input [7:0] in,
+    output [7:0] anyedge
+);
+    
+    reg [7:0]tmp;
+    always @(posedge clk)begin
+        	tmp <= in;
+          anyedge <= tmp ^ in;
+    end
+
+endmodule
+```
+
+
+
 #### Edge capture register
+
+以下代码对了一半:
+
+```verilog
+module top_module (
+    input clk,
+    input reset,
+    input [31:0] in,
+    output [31:0] out
+);
+    reg [31:0]old;
+    always @(posedge clk) begin
+        old <= in;
+        if (old & ~in || reset) begin
+        	out <= reset? 0: old & ~in;
+        end
+    end
+
+endmodule
+```
+
+其中, 没有else的if用于在没有真正关心的事件时保持。
+
+这个答案可以通过一半的测试, 能通过这些测试的原因是因为在这之前的out为0, 这段代码(不考虑reset部分)的逻辑只会输出发生改变的那几位, 但是题目要求:
+
+*"Capture" means that the output will remain 1 until the register is reset (synchronous reset).*
+
+所以输出的并不是只有当前改变的, 还有之前out也应该输出。所以加上一个或逻辑就好了:
+
+```verilog
+module top_module (
+    input clk,
+    input reset,
+    input [31:0] in,
+    output [31:0] out
+);
+    reg [31:0]old;
+    always @(posedge clk) begin
+        old <= in;
+        if (old & ~in || reset) begin
+        	out <= reset? 0: old & ~in | out;
+        end
+    end
+
+endmodule
+```
+
+
+
 #### Dual-edge triggered flip-flop
+
+第一次的尝试是受到手册中:
+
+*NOTE: The Verilog language does not have a true “sensitivity list”. ...*的启发:
+
+```verilog
+module top_module (
+    input clk,
+    input d,
+    output q
+);
+  
+  reg old;
+  always @(*) begin
+  	old <= clk;
+    if (old != clk) q <= d;
+  end
+
+endmodule
+```
+
+但是果然还是不行, 这样q会一直输出0。
+
+然后还是参考Hint:
+
+- You can't create a dual-edge triggered flip-flop on an FPGA. But you can create both positive-edge triggered *and* negative-edge triggered flip-flops.
+
+```verilog
+module top_module (
+    input clk,
+    input d,
+    output q
+);
+    
+	wire q1, q2;
+  assign q = q1 | q2;
+    
+    always @(posedge clk) begin
+        q1 <= d;
+    end
+    
+    always @(negedge clk) begin
+        q2 <= d;
+    end
+
+endmodule
+```
+
+但是这样会导致有些时候q的输出会有延时, 导致这样的原因是:
+
+1. 虽然声明为wire, 但其实q1和q2是reg。(对于verilog而言wire和reg其实没有区别。)
+2. 对于q1和q2, 其实会保持一个clk周期, 但其实真正需要关注的其实是半个clk周期。
+
+所以只要改进为按照clk分类就好:
+
+```verilog
+module top_module (
+    input clk,
+    input d,
+    output q
+);
+    
+	wire q1, q2;
+    assign q = clk ? q1 : q2;
+    
+    always @(posedge clk) begin
+        q1 <= d;
+    end
+    
+    always @(negedge clk) begin
+        q2 <= d;
+    end
+
+endmodule
+```
+
+我一开始写的是, `assign q = clk ? q2 : q1;`, 由于我误会了<=会占一拍, 其实这种一拍是相对于那一瞬间的一拍。
+
+标答更简洁, 但更费脑子:
+
+```verilog
+module top_module(
+	input clk,
+	input d,
+	output q);
+	
+	reg p, n;
+	
+	// A positive-edge triggered flip-flop
+    always @(posedge clk)
+        p <= d ^ n;
+        
+    // A negative-edge triggered flip-flop
+    always @(negedge clk)
+        n <= d ^ p;
+    
+    // Why does this work? 
+    // After posedge clk, p changes to d^n. Thus q = (p^n) = (d^n^n) = d.
+    // After negedge clk, n changes to d^p. Thus q = (p^n) = (p^d^p) = d.
+    // At each (positive or negative) clock edge, p and n FFs alternately
+    // load a value that will cancel out the other and cause the new value of d to remain.
+    assign q = p ^ n;
+    
+    
+	// Can't synthesize this.
+	/*always @(posedge clk, negedge clk) begin
+		q <= d;
+	end*/
+    
+    
+endmodule
+```
+
+
 
 ### Counters
 #### Four-bit binary counter
