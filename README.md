@@ -1809,16 +1809,504 @@ endmodule
 
 #### Decade counter again
 #### Slow decade counter
+
+这题做了挺久的, 主要是没有省清题目。
+
+题目说:
+
+*slowena input indicates when the counter should increment.*
+
+然后照着之前来写会有一个问题:
+
+```verilog
+module top_module (
+    input clk,
+    input slowena,
+    input reset,
+    output [3:0] q);
+    
+    reg [3:0]p;
+    
+    always @(posedge clk)
+      if (reset || q == 4'd9)
+            	q <= 4'h0;
+    		else begin
+                if (slowena)
+                    q <= (q + 4'h1) % 4'd10;
+            end
+          
+endmodule
+```
+
+所以这也是我觉得之前[Decade counter](#### Decade counter)那题标答有的问题, 因为本质在q == 4'd9的时候将q <= 0也是一种*counter increment*的情况。
+
+所以综合一下我的代码是:
+
+```verilog
+module top_module (
+    input clk,
+    input slowena,
+    input reset,
+    output [3:0] q);
+    
+    reg [3:0]p;
+    
+    always @(posedge clk)
+        if (reset)
+            q <= 4'h0;
+    		else begin
+                if (slowena)
+                    q <= (q + 4'h1) % 4'd10;
+            end
+               
+endmodule
+```
+
+
+
 #### Counter 1-12
+
+摸索了一阵:
+
+然后有了这个半对的写法, 还是因为c_load只有if没有else导致其没有归零。
+
+```verilog
+module top_module (
+    input clk,
+    input reset,
+    input enable,
+    output [3:0] Q,
+    output c_enable,
+    output c_load,
+    output [3:0] c_d
+); 
+
+    assign c_enable = enable;
+    
+    always @(*) begin
+        if (reset) begin c_load = '1; c_d = 4'd1; end
+        else begin 
+            if (Q == 4'd12 && enable) begin c_load = 4'd1; c_d = 4'd1; end
+        end 
+    end
+    
+    count4 the_counter (clk, c_enable, c_load, c_d, Q);
+
+endmodule
+```
+
+改一下就好了:
+
+```verilog
+module top_module (
+    input clk,
+    input reset,
+    input enable,
+    output [3:0] Q,
+    output c_enable,
+    output c_load,
+    output [3:0] c_d
+); 
+
+    assign c_enable = enable;
+    
+    always @(*) begin
+        if (reset) begin c_load = '1; c_d = 4'd1; end
+        else if (Q == 4'd12 && enable) begin c_load = 4'd1; c_d = 4'd1; end
+        else begin c_load = '0; end
+    end
+    
+    count4 the_counter (clk, c_enable, c_load, c_d, Q);
+
+endmodule
+```
+
+
+
 #### Counter 1000
+
+暂不讨论1Hz的输出错误, 这一份代码会导致第三个计数器无法进位, 因为第三个计数器要进位时已经满足了第一个if条件。
+
+```verilog
+module top_module (
+    input clk,
+    input reset,
+    output OneHertz,
+    output [2:0] c_enable
+); //
+    
+    reg [3:0] q0, q1, q2;
+    wire r0, r1, r2;
+    reg out;
+    
+    assign c_enable[0] = 1;
+    
+    always @(*)begin
+        r0 = 0; r1 = 0; r2 = 0; c_enable[2:1] = 2'b0;
+        if (q0 == 4'd9)  begin r0 = 1; c_enable[1] = 1; end 
+        else if (q1 == 4'd9)  begin r1 = 1; c_enable[2] = 1; end 
+        else if (q2 == 4'd9)  begin r2 = 1; out = ~out; end
+    end
+
+    bcdcount counter0 (clk, reset | r0, c_enable[0], q0);
+    bcdcount counter1 (clk, reset | r1, c_enable[1], q1);
+    bcdcount counter2 (clk, reset | r2, c_enable[2], q2);
+
+endmodule
+```
+
+所以注意if应该是嵌套的。
+
+然后我一开始以为是实现一个维持高电平0.5s再维持0.5s低电平的时钟, 但其实不是, 只是每1s跳动一下的时钟:
+
+```verilog
+module top_module (
+    input clk,
+    input reset,
+    output OneHertz,
+    output [2:0] c_enable
+); //
+    
+    reg [3:0] q0, q1, q2;
+    wire r0, r1, r2;
+    
+    assign c_enable[0] = 1;
+    
+    always @(*)begin
+        r0 = 0; r1 = 0; r2 = 0; c_enable[2:1] = 2'b0; OneHertz = '0;
+        if (q0 == 4'd9)  begin 
+            r0 = 1; c_enable[1] = 1; 
+            if(q1 == 4'd9) begin 
+                r1 = 1; c_enable[2] = 1'b1; 
+                if (q2 == 4'd9)  begin 
+                    r2 = 1; OneHertz = 1'b1;
+                end
+            end
+        end 
+    end
+
+    bcdcount counter0 (clk, reset | r0, c_enable[0], q0);
+    bcdcount counter1 (clk, reset | r1, c_enable[1], q1);
+    bcdcount counter2 (clk, reset | r2, c_enable[2], q2);
+
+endmodule
+```
+
+**但其实想想对于上升沿而言, 这也是个1Hz的时钟。**(因为每1s出现一次上升沿)
+
+另外尝试了一下其他写法, 跟一遍的编程语言还是有差异的, 以下的写法是有问题的, 达不到相同的效果:
+
+```verilog
+module top_module (
+    input clk,
+    input reset,
+    output OneHertz,
+    output [2:0] c_enable
+); //
+    
+    reg [3:0] q0, q1, q2;
+    wire r0, r1, r2;
+    
+    assign c_enable[0] = 1;
+    
+    always @(*)begin
+        r0 = 0; r1 = 0; r2 = 0; c_enable[2:1] = 2'b0; OneHertz = '0;
+        if (q0 == 4'd9) begin r0 = 1; c_enable[1] = 1; end
+        if (q1 == 4'd9) begin r1 = 1; c_enable[2] = 1; end
+        if (q2 == 4'd9) begin r2 = 1; OneHertz = 1'b1; end
+    end
+
+    bcdcount counter0 (clk, reset | r0, c_enable[0], q0);
+    bcdcount counter1 (clk, reset | r1, c_enable[1], q1);
+    bcdcount counter2 (clk, reset | r2, c_enable[2], q2);
+
+endmodule
+```
+
+然后看了一下网上其他人的代码, 其实是不需要单独去写那几个r的, 因为本身超过那个值就会归0。
+
+另外, 用backwards思想能让代码更简洁:
+
+```verilog
+module top_module (
+    input clk,
+    input reset,
+    output OneHertz,
+    output [2:0] c_enable
+); //
+    
+  reg [3:0] q0, q1, q2;
+  
+  bcdcount counter0 (clk, reset, c_enable[0], q0);
+  bcdcount counter1 (clk, reset, c_enable[1], q1);
+  bcdcount counter2 (clk, reset, c_enable[2], q2);
+    
+  assign c_enable[0] = 1;
+  assign c_enable[1] = (q0 == 4'd9);
+  assign c_enable[2] = (q0 == 4'd9) && (q1 == 4'd9);
+    
+  assign OneHertz = ((q0 == 4'd9) && (q1 == 4'd9) && (q2 == 4'd9))? 1'b1 :1'b0;
+
+endmodule
+```
+
+
+
 #### 4-digit decimal counter
+
+ 改用backwards思想, 代码简洁又快乐:
+
+```verilog
+module top_module (
+    input clk,
+    input reset,   // Synchronous active-high reset
+    output [3:1] ena,
+    output [15:0] q);
+    
+    wire [3:0] q0, q1, q2, q3;
+    
+    assign q = {q3, q2, q1, q0};
+    
+  	assign ena[1] = (q0 == 4'd9);
+  	assign ena[2] = (q0 == 4'd9) && (q1 == 4'd9);
+    assign ena[3] = (q0 == 4'd9) && (q1 == 4'd9) && (q2 == 4'd9);
+    
+    bcdcount counter0 (clk, reset, 1'b1, q0);
+    bcdcount counter1 (clk, reset, ena[1], q1);
+    bcdcount counter2 (clk, reset, ena[2], q2);
+    bcdcount counter3 (clk, reset, ena[3], q3);
+
+endmodule
+
+module bcdcount (
+    input clk,
+    input reset,
+    input enable,
+    output [3:0] q);
+   
+    always @(posedge clk)
+        if (reset)
+            q <= 4'h0;
+    		else begin
+          if (enable) q <= (q + 4'h1) % 4'd10;
+        end
+          
+endmodule
+```
+
+
+
 #### 12-hour clock
+
+挺麻烦的, 单纯记录一下我自己的成功:
+
+```verilog
+module top_module(
+    input clk,
+    input reset,
+    input ena,
+    output pm,
+    output [7:0] hh,
+    output [7:0] mm,
+    output [7:0] ss); 
+    
+    wire enable[2:0];
+    
+    assign enable[0] = ena;
+    assign enable[1] = ena && ss == {4'd5, 4'd9};
+    assign enable[2] = ena && mm == {4'd5, 4'd9} && ss == {4'd5, 4'd9};
+    
+    always @(posedge clk)
+        pm <= reset? '0: (hh == {4'd1, 4'd1} && mm == {4'd5, 4'd9} && ss == {4'd5, 4'd9})? ~pm: pm;
+    
+    bcdcount60 S(clk, reset, enable[0], ss);
+    bcdcount60 M(clk, reset, enable[1], mm);
+    bcdcount12 H(clk, reset, enable[2], hh);
+    
+endmodule
+
+module bcdcount60 (
+    input clk,
+    input reset,
+    input enable,
+    output [7:0] q);
+   
+    always @(posedge clk) begin
+        q[3:0] <= reset? 4'h0: enable? {q[3:0] + 4'h1} % 4'd10 : q[3:0];
+    	q[7:4] <= reset? 4'h0: enable? ((q[3:0] == 4'd9)? {q[7:4] + 4'h1} % 4'd6: q[7:4]) :q[7:4];
+        /*
+        if (reset) begin q <= 8'b0; end
+        else begin
+            if (enable) begin
+                q[3:0] <= {q[3:0] + 4'h1} % 4'd10;
+                q[7:4] <= (q[3:0] == 4'd9)? {q[7:4] + 4'h1} % 4'd6: q[7:4];
+            end
+        end
+        */
+    end
+        
+endmodule
+
+module bcdcount12 (
+    input clk,
+    input reset,
+    input enable,
+    output [7:0] q);
+   
+    always @(posedge clk) begin
+        if (reset) begin
+            q <= {4'd1, 4'd2};
+        end 
+        else begin
+            if (enable) begin
+                if (q[7:4] == 4'd1 && q[3:0] == 4'd2) begin q[7:4] <= '0; q[3:0] <= 4'd1; end
+                else begin
+                    q[3:0] <= {q[3:0] + 4'h1} % 4'd10;
+                    q[7:4] <= (q[3:0] == 4'd9)? 4'd1: q[7:4];
+                end
+            end
+        end
+    end
+        
+endmodule
+```
+
+
 
 ### Shift Registers
 #### 4-bit shift register
+
+我的代码:
+
+```verilog
+module top_module(
+    input clk,
+    input areset,  // async active-high reset to zero
+    input load,
+    input ena,
+    input [3:0] data,
+    output reg [3:0] q); 
+    
+    always @(posedge clk, posedge areset) begin
+        if (areset)begin
+        	q <= 4'b0;
+        end
+        else begin
+            if (load) begin
+            	q <= data;
+            end
+            else begin
+                if (ena) q <= q >> 1;
+            end
+        end
+    end
+        
+endmodule
+```
+
+我用嵌套的if来解决优先级问题。但似乎标答直接用else if来解决这个问题:
+
+```verilog
+module top_module(
+	input clk,
+	input areset,
+	input load,
+	input ena,
+	input [3:0] data,
+	output reg [3:0] q);
+	
+	// Asynchronous reset: Notice the sensitivity list.
+	// The shift register has four modes:
+	//   reset
+	//   load
+	//   enable shift
+	//   idle -- preserve q (i.e., DFFs)
+	always @(posedge clk, posedge areset) begin
+		if (areset)		// reset
+			q <= 0;
+		else if (load)	// load
+			q <= data;
+		else if (ena)	// shift is enabled
+			q <= q[3:1];	// Use vector part select to express a shift.
+	end
+	
+endmodule
+```
+
+我查了一下手册, 发现似乎verilog-2001中只有if和if - else, 没有else if(或者说else if就是另外一种if - else + if的可能性?我不确定)。
+
+但System Verilog明确支持else if。
+
+另外据我查到的说法, if确实有优先级之说, 第一个最高, 最后的else最低。case只用于单变量互斥的情况。
+
+
+
 #### Left/right rotator
 #### Left/right arithmetic shift by 1 or 8
 #### 5-bit LFSR
+
+我的代码:
+
+```verilog
+module top_module(
+    input clk,
+    input reset,    // Active-high synchronous reset to 5'h1
+    output [4:0] q
+); 
+    always @(posedge clk) begin
+        if (reset) begin
+            q <= 5'h1;
+        end
+        else begin
+            {q[3], q[1:0]} <= {q[4], q[2:1]};
+            {q[4], q[2]} <= {1'b0, q[3]} ^ {2{q[0]}};    
+        end
+    end
+        
+endmodule
+```
+
+表答的思想可以借鉴:
+
+```verilog
+module top_module(
+	input clk,
+	input reset,
+	output reg [4:0] q);
+	
+	reg [4:0] q_next;		// q_next is not a register
+
+	// Convenience: Create a combinational block of logic that computes
+	// what the next value should be. For shorter code, I first shift
+	// all of the values and then override the two bit positions that have taps.
+	// A logic synthesizer creates a circuit that behaves as if the code were
+	// executed sequentially, so later assignments override earlier ones.
+	// Combinational always block: Use blocking assignments.
+	always @(*) begin
+		q_next = q[4:1];	// Shift all the bits. This is incorrect for q_next[4] and q_next[2]
+		q_next[4] = q[0];	// Give q_next[4] and q_next[2] their correct assignments
+		q_next[2] = q[3] ^ q[0];
+	end
+	
+	
+	// This is just a set of DFFs. I chose to compute the connections between the
+	// DFFs above in its own combinational always block, but you can combine them if you wish.
+	// You'll get the same circuit either way.
+	// Edge-triggered always block: Use non-blocking assignments.
+	always @(posedge clk) begin
+		if (reset)
+			q <= 5'h1;
+		else
+			q <= q_next;
+	end
+	
+endmodule
+```
+
+注意: **A logic synthesizer creates a circuit that behaves as if the code were executed sequentially, so later assignments override earlier ones.**
+
+
+
 #### 3-bit LFSR
 #### 32-bit LFSR
 #### Shift register
